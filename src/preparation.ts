@@ -1,5 +1,6 @@
 import type { ImageSamplingPlan, LinearImage, SourceSampler } from "@foss-earth/images";
 import { SOURCE_CUBE_FACES, type CubeFaceName } from "@foss-earth/sphere-cubemap/core";
+import type { CubePreparationKernel } from "@foss-earth/sphere-cubemap/preparation";
 import type { CubeWarp } from "./cubeTiling.js";
 
 /**
@@ -10,19 +11,24 @@ import type { CubeWarp } from "./cubeTiling.js";
 const CUBE_PREPARATION_LEVEL = Symbol.for("foss-earth.equirectangular.cubePreparationLevel");
 
 /** Full face including exterior gutter, preserving renderTileFace's sample grid. */
-export function renderTileFace(plan: ImageSamplingPlan, face: CubeFaceName, size: number, warp: CubeWarp, gutter: number): LinearImage {
-  return renderRegion(plan, face, size, warp, gutter, 0, 0, size);
+export function renderTileFace(plan: ImageSamplingPlan, face: CubeFaceName, size: number, warp: CubeWarp, gutter: number, kernel?: CubePreparationKernel): LinearImage {
+  return renderRegion(plan, face, size, warp, gutter, 0, 0, size, kernel);
 }
 /** Same pixels as cropping the full face at x*tileSize,y*tileSize, without its allocation. */
-export function renderCubeTile(plan: ImageSamplingPlan, face: CubeFaceName, faceSize: number, warp: CubeWarp, gutter: number, tileSize: number, x: number, y: number): LinearImage {
+export function renderCubeTile(plan: ImageSamplingPlan, face: CubeFaceName, faceSize: number, warp: CubeWarp, gutter: number, tileSize: number, x: number, y: number, kernel?: CubePreparationKernel): LinearImage {
   if (!Number.isSafeInteger(tileSize) || tileSize < 1 || faceSize % tileSize !== 0 || !Number.isSafeInteger(x) || !Number.isSafeInteger(y) || x < 0 || y < 0 || x >= faceSize / tileSize || y >= faceSize / tileSize) throw new RangeError("Tile coordinates must address a complete face grid.");
-  return renderRegion(plan, face, faceSize, warp, gutter, x * tileSize, y * tileSize, tileSize);
+  return renderRegion(plan, face, faceSize, warp, gutter, x * tileSize, y * tileSize, tileSize, kernel);
 }
-function renderRegion(plan: ImageSamplingPlan, face: CubeFaceName, size: number, warp: CubeWarp, gutter: number, x: number, y: number, regionSize: number): LinearImage {
+function renderRegion(plan: ImageSamplingPlan, face: CubeFaceName, size: number, warp: CubeWarp, gutter: number, x: number, y: number, regionSize: number, kernel?: CubePreparationKernel): LinearImage {
   const { samplesPerAxis: samples } = plan;
   if (!Number.isSafeInteger(size) || size < 1 || !Number.isSafeInteger(gutter) || gutter < 0 || !Number.isSafeInteger(samples) || samples < 1 || !Number.isFinite(plan.footprintRadians) || plan.footprintRadians < 0 || !["equi-angular", "gnomonic"].includes(warp)) throw new RangeError("Preparation needs valid face/grid/gutter/warp and angular footprint.");
   const { f, r, t } = SOURCE_CUBE_FACES[face];
   const level = cubePreparationLevel(plan.source);
+  if (kernel) {
+    if (!level) throw new RangeError("A cube preparation kernel needs an equirectangular preparation level.");
+    return kernel.renderEquirectRegion({ source: level, face, faceSize: size, samplesPerAxis: samples,
+      warp, gutter, originX: x, originY: y, regionSize });
+  }
   if (level) return renderEquirectRegion(level, f, r, t, size, warp, gutter, x, y, regionSize, samples);
   const side = regionSize + 2 * gutter;
   const data = new Float32Array(side * side * 3);
